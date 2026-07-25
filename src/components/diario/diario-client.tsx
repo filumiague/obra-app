@@ -7,6 +7,7 @@ import { AlertTriangle } from "lucide-react";
 import { addMaterialUso, setAvaliacaoDia } from "@/actions/diario.actions";
 import { AtividadeCard } from "@/components/diario/atividade-card";
 import { ImprevistoForm } from "@/components/diario/imprevisto-form";
+import { RelatorioExport } from "@/components/relatorios/relatorio-export";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -75,6 +76,17 @@ export function DiarioClient({ data }: { data: DiarioData }) {
       )}
 
       <AvaliacaoSection data={data} />
+
+      <Card>
+        <CardHeader>
+          <h2 className="font-semibold">Relatórios</h2>
+        </CardHeader>
+        <CardContent>
+          <RelatorioExport
+            completoDisponivel={data.diario.avaliacaoNota !== null}
+          />
+        </CardContent>
+      </Card>
 
       <Dialog open={imprevistoOpen} onOpenChange={setImprevistoOpen}>
         <DialogTrigger

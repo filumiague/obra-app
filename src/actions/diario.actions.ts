@@ -1,0 +1,298 @@
+"use server";
+
+import { randomUUID } from "node:crypto";
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, getSignedMidiaUrl } from "@/lib/supabase/admin";
+import { startOfDayUTC } from "@/lib/date";
+
+async function requireUser() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  return user;
+}
+
+async function getOrCreateDiarioHoje(preenchidoPorId: string) {
+  const hoje = startOfDayUTC(new Date());
+  return prisma.diarioObra.upsert({
+    where: { data: hoje },
+    update: {},
+    create: { data: hoje, preenchidoPorId },
+  });
+}
+
+export async function getDiarioHoje() {
+  const user = await requireUser();
+  const diario = await getOrCreateDiarioHoje(user.id);
+  const hoje = startOfDayUTC(new Date());
+
+  const itensPlanejados = await prisma.etapaDiaPlanejado.findMany({
+    where: { data: hoje, etapa: { regraOuro: { status: "LIBERADA" } } },
+    include: {
+      etapa: true,
+      subEtapas: { orderBy: { ordem: "asc" } },
+      atividadeDiario: {
+        where: { diarioObraId: diario.id },
+        include: { midias: { orderBy: { timestamp: "asc" } } },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const itensComMidiaUrl = await Promise.all(
+    itensPlanejados.map(async (item) => ({
+      ...item,
+      atividadeDiario: await Promise.all(
+        item.atividadeDiario.map(async (a) => ({
+          ...a,
+          midias: await Promise.all(
+            a.midias.map(async (m) => ({
+              ...m,
+              url: await getSignedMidiaUrl(m.storagePath),
+            })),
+          ),
+        })),
+      ),
+    })),
+  );
+
+  const materiais = await prisma.material.findMany({ orderBy: { nome: "asc" } });
+
+  const materiaisUsadosRaw = await prisma.materialUsoDiario.findMany({
+    where: { diarioObraId: diario.id },
+    include: { material: true },
+    orderBy: { createdAt: "desc" },
+  });
+  // Prisma's Decimal isn't a plain object, so it can't cross the RSC boundary as-is.
+  const materiaisUsados = materiaisUsadosRaw.map((m) => ({
+    ...m,
+    quantidade: m.quantidade.toNumber(),
+  }));
+
+  const imprevistosRaw = await prisma.imprevisto.findMany({
+    where: { diarioObraId: diario.id },
+    orderBy: { dataHora: "desc" },
+  });
+  const imprevistos = await Promise.all(
+    imprevistosRaw.map(async (i) => ({
+      ...i,
+      fotoUrl: i.fotoStoragePath ? await getSignedMidiaUrl(i.fotoStoragePath) : null,
+    })),
+  );
+
+  return {
+    diario,
+    itensPlanejados: itensComMidiaUrl,
+    materiais,
+    materiaisUsados,
+    imprevistos,
+  };
+}
+
+export async function updateAtividadeStatus(input: {
+  etapaDiaPlanejadoId: string;
+  status: "NAO_INICIADO" | "EM_ANDAMENTO" | "CONCLUIDO" | "PARCIAL" | "NAO_REALIZADO";
+  oQueFoiFeito: string | null;
+  motivoImpacto: string | null;
+}) {
+  const user = await requireUser();
+
+  const plano = await prisma.etapaDiaPlanejado.findUniqueOrThrow({
+    where: { id: input.etapaDiaPlanejadoId },
+    include: { etapa: { include: { regraOuro: true } } },
+  });
+  if (plano.etapa.regraOuro?.status !== "LIBERADA") {
+    return { error: "Esta etapa ainda não foi liberada (Regra de Ouro)." };
+  }
+
+  if (
+    (input.status === "PARCIAL" || input.status === "NAO_REALIZADO") &&
+    !input.motivoImpacto?.trim()
+  ) {
+    return { error: "Motivo/impacto é obrigatório quando o status é parcial ou não realizado." };
+  }
+
+  const diario = await getOrCreateDiarioHoje(user.id);
+
+  await prisma.diarioAtividade.upsert({
+    where: {
+      diarioObraId_etapaDiaPlanejadoId: {
+        diarioObraId: diario.id,
+        etapaDiaPlanejadoId: input.etapaDiaPlanejadoId,
+      },
+    },
+    update: {
+      status: input.status,
+      oQueFoiFeito: input.oQueFoiFeito,
+      motivoImpacto: input.motivoImpacto,
+    },
+    create: {
+      diarioObraId: diario.id,
+      etapaDiaPlanejadoId: input.etapaDiaPlanejadoId,
+      status: input.status,
+      oQueFoiFeito: input.oQueFoiFeito,
+      motivoImpacto: input.motivoImpacto,
+    },
+  });
+
+  revalidatePath("/diario");
+  return { error: null };
+}
+
+export async function addMidia(formData: FormData) {
+  const user = await requireUser();
+  const etapaDiaPlanejadoId = String(formData.get("etapaDiaPlanejadoId"));
+  const legenda = formData.get("legenda") ? String(formData.get("legenda")) : null;
+  const file = formData.get("file") as File | null;
+
+  if (!file || file.size === 0) return { error: "Nenhum arquivo selecionado." };
+
+  const plano = await prisma.etapaDiaPlanejado.findUniqueOrThrow({
+    where: { id: etapaDiaPlanejadoId },
+    include: { etapa: { include: { regraOuro: true } } },
+  });
+  if (plano.etapa.regraOuro?.status !== "LIBERADA") {
+    return { error: "Esta etapa ainda não foi liberada (Regra de Ouro)." };
+  }
+
+  const diario = await getOrCreateDiarioHoje(user.id);
+
+  const atividade = await prisma.diarioAtividade.upsert({
+    where: {
+      diarioObraId_etapaDiaPlanejadoId: {
+        diarioObraId: diario.id,
+        etapaDiaPlanejadoId,
+      },
+    },
+    update: {},
+    create: {
+      diarioObraId: diario.id,
+      etapaDiaPlanejadoId,
+      status: "NAO_INICIADO",
+    },
+  });
+
+  const tipo = file.type.startsWith("video") ? "VIDEO" : "FOTO";
+  const ext = file.name.split(".").pop() || (tipo === "VIDEO" ? "mp4" : "jpg");
+  const path = `${diario.id}/${atividade.id}/${randomUUID()}.${ext}`;
+
+  const admin = createAdminClient();
+  const { error: uploadError } = await admin.storage
+    .from("midias")
+    .upload(path, file, { contentType: file.type });
+
+  if (uploadError) return { error: `Falha no upload: ${uploadError.message}` };
+
+  await prisma.midia.create({
+    data: {
+      diarioAtividadeId: atividade.id,
+      tipo,
+      storagePath: path,
+      legenda,
+    },
+  });
+
+  revalidatePath("/diario");
+  return { error: null };
+}
+
+export async function addMaterialUso(input: { materialId: string; quantidade: number }) {
+  const user = await requireUser();
+  if (!input.materialId || !(input.quantidade > 0)) {
+    return { error: "Selecione um material e uma quantidade válida." };
+  }
+
+  const diario = await getOrCreateDiarioHoje(user.id);
+
+  await prisma.$transaction(async (tx) => {
+    const uso = await tx.materialUsoDiario.create({
+      data: {
+        diarioObraId: diario.id,
+        materialId: input.materialId,
+        quantidade: input.quantidade,
+      },
+    });
+    await tx.movimentoEstoque.create({
+      data: {
+        materialId: input.materialId,
+        tipo: "SAIDA",
+        quantidade: input.quantidade,
+        origemTipo: "USO_DIARIO",
+        origemUsoDiarioId: uso.id,
+      },
+    });
+  });
+
+  revalidatePath("/diario");
+  return { error: null };
+}
+
+export async function addImprevisto(formData: FormData) {
+  const user = await requireUser();
+  const descricao = String(formData.get("descricao") ?? "").trim();
+  const gravidade = String(formData.get("gravidade") ?? "");
+  const urgencia = String(formData.get("urgencia") ?? "");
+  const oQuePrecisa = String(formData.get("oQuePrecisa") ?? "");
+  const file = formData.get("file") as File | null;
+
+  if (!descricao) return { error: "Descreva o imprevisto." };
+
+  const diario = await getOrCreateDiarioHoje(user.id);
+
+  let fotoStoragePath: string | null = null;
+  if (file && file.size > 0) {
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `imprevistos/${diario.id}/${randomUUID()}.${ext}`;
+    const admin = createAdminClient();
+    const { error: uploadError } = await admin.storage
+      .from("midias")
+      .upload(path, file, { contentType: file.type });
+    if (uploadError) return { error: `Falha no upload: ${uploadError.message}` };
+    fotoStoragePath = path;
+  }
+
+  await prisma.imprevisto.create({
+    data: {
+      diarioObraId: diario.id,
+      descricao,
+      gravidade: gravidade as "BAIXA" | "MEDIA" | "ALTA",
+      urgencia: urgencia as "BAIXA" | "MEDIA" | "ALTA",
+      oQuePrecisa: oQuePrecisa as "MATERIAL" | "DECISAO" | "MAO_DE_OBRA" | "OUTRO",
+      fotoStoragePath,
+    },
+  });
+
+  revalidatePath("/diario");
+  revalidatePath("/imprevisto");
+  return { error: null };
+}
+
+export async function setAvaliacaoDia(input: {
+  nota: number;
+  aderencia: string;
+  qualidade: string;
+  organizacao: string;
+  seguranca: string;
+}) {
+  const user = await requireUser();
+  const diario = await getOrCreateDiarioHoje(user.id);
+
+  await prisma.diarioObra.update({
+    where: { id: diario.id },
+    data: {
+      avaliacaoNota: input.nota,
+      avaliacaoAderencia: input.aderencia || null,
+      avaliacaoQualidade: input.qualidade || null,
+      avaliacaoOrganizacao: input.organizacao || null,
+      avaliacaoSeguranca: input.seguranca || null,
+    },
+  });
+
+  revalidatePath("/diario");
+  return { error: null };
+}

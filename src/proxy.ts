@@ -1,9 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-// Refreshes the Supabase auth session on every request. Role-based route
-// guards (gestor vs. campo) are added in the Auth phase, once User.role is
-// wired up end-to-end.
+const GESTOR_ONLY_PATHS = ["/dashboard", "/planejamento", "/estoque", "/relatorios"];
+const PUBLIC_PATHS = ["/login", "/"];
+
+// Refreshes the Supabase auth session on every request and enforces the
+// gestor/campo route split. Role comes from the JWT's app_metadata (set at
+// user creation), so this never needs a DB round trip.
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -28,7 +31,30 @@ export async function proxy(request: NextRequest) {
     },
   );
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { pathname } = request.nextUrl;
+  const isPublic = PUBLIC_PATHS.includes(pathname);
+
+  if (!user && !isPublic) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  if (user) {
+    const role = user.app_metadata?.role;
+
+    if (pathname === "/login") {
+      return NextResponse.redirect(
+        new URL(role === "CAMPO" ? "/diario" : "/dashboard", request.url),
+      );
+    }
+
+    if (role === "CAMPO" && GESTOR_ONLY_PATHS.includes(pathname)) {
+      return NextResponse.redirect(new URL("/diario", request.url));
+    }
+  }
 
   return supabaseResponse;
 }

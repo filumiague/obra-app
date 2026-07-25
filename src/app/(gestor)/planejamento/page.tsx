@@ -7,6 +7,9 @@ function formatDate(d: Date) {
   return new Date(d).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 }
 
+// New semanas are created constantly — never prerender this list.
+export const dynamic = "force-dynamic";
+
 export default async function PlanejamentoPage() {
   const semanas = await getSemanas();
 

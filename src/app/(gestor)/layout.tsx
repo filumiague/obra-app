@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { signOut } from "@/actions/auth.actions";
 
@@ -9,7 +10,10 @@ export default function GestorLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <header className="flex items-center justify-between border-b p-3">
-        <span className="text-sm font-medium">Controle de Obra</span>
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Image src="/logo.png" alt="" width={20} height={20} />
+          Controle de Obra
+        </span>
         <form action={signOut}>
           <button type="submit" className="text-sm text-muted-foreground">
             Sair

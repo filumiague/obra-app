@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useActionState } from "react";
 import { signIn } from "@/actions/auth.actions";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,14 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-6">
       <form action={formAction} className="w-full max-w-sm space-y-4">
         <div className="space-y-1 text-center">
+          <Image
+            src="/logo.png"
+            alt="Controle de Obra"
+            width={72}
+            height={72}
+            className="mx-auto mb-2"
+            priority
+          />
           <h1 className="text-xl font-semibold">Controle de Obra</h1>
           <p className="text-sm text-muted-foreground">Entrar na sua conta</p>
         </div>

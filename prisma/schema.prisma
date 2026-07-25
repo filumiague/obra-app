@@ -1,0 +1,497 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  GESTOR
+  CAMPO
+}
+
+enum StatusAtividade {
+  NAO_INICIADO
+  EM_ANDAMENTO
+  CONCLUIDO
+  PARCIAL
+  NAO_REALIZADO
+}
+
+enum StatusPendencia {
+  ABERTA
+  EM_ANDAMENTO
+  CONCLUIDA
+}
+
+enum OrigemPendencia {
+  VISITA
+  DIARIO
+}
+
+enum StatusPagamento {
+  PENDENTE
+  PAGO
+}
+
+enum StatusRegraOuro {
+  RASCUNHO
+  LIBERADA
+  BLOQUEADA
+}
+
+enum Gravidade {
+  BAIXA
+  MEDIA
+  ALTA
+}
+
+enum NecessidadeImprevisto {
+  MATERIAL
+  DECISAO
+  MAO_DE_OBRA
+  OUTRO
+}
+
+enum TipoMovimentoEstoque {
+  ENTRADA
+  SAIDA
+}
+
+enum OrigemMovimento {
+  COMPRA_PLANEJAMENTO
+  USO_DIARIO
+  AJUSTE_MANUAL
+}
+
+enum TipoMidia {
+  FOTO
+  VIDEO
+}
+
+enum TipoRelatorio {
+  PARCIAL
+  COMPLETO
+}
+
+enum FormatoRelatorio {
+  PDF
+  DOCX
+  XLSX
+}
+
+// ============================================================
+// USERS
+// Mirrors Supabase auth.users; id = auth.users.id (uuid), synced on first login.
+// ============================================================
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  nome         String
+  role         UserRole
+  isEngenheiro Boolean  @default(false) // gates "método construtivo" field in RegraOuro
+  createdAt    DateTime @default(now())
+
+  semanasPreenchidas  SemanaPlanejamento[] @relation("PreenchidoPor")
+  diariosPreenchidos  DiarioObra[]         @relation("DiarioPreenchidoPor")
+  regrasOuroAprovadas RegraOuro[]          @relation("AprovadoPor")
+  regrasOuroCriadas   RegraOuro[]          @relation("CriadoPor")
+  relatoriosGerados   Relatorio[]
+
+  @@map("users")
+}
+
+// ============================================================
+// MODULO 1: PLANEJAMENTO SEMANAL
+// ============================================================
+
+model SemanaPlanejamento {
+  id                          String   @id @default(uuid())
+  dataInicio                  DateTime @db.Date // segunda-feira
+  dataFim                     DateTime @db.Date // sexta-feira
+  preenchidoPorId             String
+  preenchidoPor               User     @relation("PreenchidoPor", fields: [preenchidoPorId], references: [id])
+  dataPreenchimento           DateTime @default(now())
+  descricaoAtividadePrincipal String
+  objetivo                    String
+
+  etapas          Etapa[]
+  visitasTecnicas VisitaTecnica[]
+  maoDeObra       MaoDeObra[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dataInicio])
+  @@map("semanas_planejamento")
+}
+
+model Etapa {
+  id        String             @id @default(uuid())
+  semanaId  String
+  semana    SemanaPlanejamento @relation(fields: [semanaId], references: [id], onDelete: Cascade)
+  nome      String
+  descricao String?
+  ordem     Int                @default(0)
+
+  regraOuro           RegraOuro? // 1:1 — toda etapa que gera trabalho de campo precisa de uma
+  diasPlanejados      EtapaDiaPlanejado[]
+  riscos              EtapaRisco[]
+  materiaisPlanejados MaterialPlanejado[]
+  maoDeObra           MaoDeObra[]
+  correcoesPendencias CorrecaoPendencia[]
+  sobrasDirecionadas  MaterialPlanejado[] @relation("SobraFutura")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([semanaId])
+  @@map("etapas")
+}
+
+// Detalhamento dia a dia dentro de uma etapa. É a linha que o Diário consulta.
+model EtapaDiaPlanejado {
+  id                 String   @id @default(uuid())
+  etapaId            String
+  etapa              Etapa    @relation(fields: [etapaId], references: [id], onDelete: Cascade)
+  data               DateTime @db.Date
+  atividadePlanejada String
+  responsavel        String?
+  preRequisito       String?
+
+  subEtapas       SubEtapa[]
+  atividadeDiario DiarioAtividade[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([etapaId, data])
+  @@map("etapa_dias_planejados")
+}
+
+model SubEtapa {
+  id                  String            @id @default(uuid())
+  etapaDiaPlanejadoId String
+  etapaDiaPlanejado   EtapaDiaPlanejado @relation(fields: [etapaDiaPlanejadoId], references: [id], onDelete: Cascade)
+  descricao           String
+  ordem               Int               @default(0)
+
+  @@map("sub_etapas")
+}
+
+model EtapaRisco {
+  id             String @id @default(uuid())
+  etapaId        String
+  etapa          Etapa  @relation(fields: [etapaId], references: [id], onDelete: Cascade)
+  risco          String
+  probabilidade  String // texto livre (ex: baixa/média/alta) — mantido flexível
+  impacto        String
+  acaoPreventiva String
+
+  @@map("etapa_riscos")
+}
+
+model VisitaTecnica {
+  id                   String             @id @default(uuid())
+  semanaId             String
+  semana               SemanaPlanejamento @relation(fields: [semanaId], references: [id], onDelete: Cascade)
+  data                 DateTime           @db.Date
+  hora                 DateTime           @db.Time
+  motivo               String
+  problemasEncontrados String?
+  solicitacoesFeitas   String?
+
+  correcoesPendencias CorrecaoPendencia[]
+
+  createdAt DateTime @default(now())
+
+  @@map("visitas_tecnicas")
+}
+
+// Alimentada por VisitaTecnica OU pelo dia a dia de campo (DiarioAtividade)
+model CorrecaoPendencia {
+  id                    String            @id @default(uuid())
+  numero                Int               @unique @default(autoincrement())
+  dataIdentificacao     DateTime          @db.Date
+  origemTipo            OrigemPendencia
+  visitaId              String?
+  visita                VisitaTecnica?    @relation(fields: [visitaId], references: [id])
+  diarioAtividadeId     String?
+  diarioAtividade       DiarioAtividade?  @relation(fields: [diarioAtividadeId], references: [id])
+  etapaId               String?
+  etapa                 Etapa?            @relation(fields: [etapaId], references: [id])
+  problemaOuSolicitacao String
+  correcaoAprovada      String?
+  dependeDeId           String?
+  dependeDe             CorrecaoPendencia?  @relation("Dependencia", fields: [dependeDeId], references: [id])
+  dependentes           CorrecaoPendencia[] @relation("Dependencia")
+  status                StatusPendencia     @default(ABERTA)
+  dataConclusao         DateTime?           @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("correcoes_pendencias")
+}
+
+// Catálogo de material do projeto (persiste entre semanas — alimenta o Estoque continuamente)
+model Material {
+  id      String @id @default(uuid())
+  nome    String @unique
+  unidade String // un, m2, m3, kg, saco, etc.
+
+  planejados        MaterialPlanejado[]
+  usosDiario        MaterialUsoDiario[]
+  movimentosEstoque MovimentoEstoque[]
+
+  createdAt DateTime @default(now())
+
+  @@map("materiais")
+}
+
+model MaterialPlanejado {
+  id         String   @id @default(uuid())
+  materialId String
+  material   Material @relation(fields: [materialId], references: [id])
+  etapaId    String
+  etapa      Etapa    @relation(fields: [etapaId], references: [id], onDelete: Cascade)
+
+  qtdPlanejada        Decimal   @db.Decimal(12, 3)
+  ondeUsado           String
+  memorialCalculo     String?
+  valorUnitario       Decimal   @db.Decimal(12, 2)
+  valorTotal          Decimal   @db.Decimal(12, 2) // calculado na app (qtdPlanejada * valorUnitario)
+  fornecedor          String?
+  dataCompraPrevista  DateTime? @db.Date
+  dataEntregaPrevista DateTime? @db.Date
+
+  qtdComprada      Decimal? @db.Decimal(12, 3)
+  qtdSobra         Decimal? @db.Decimal(12, 3)
+  sobraParaEtapaId String? // qual etapa futura vai usar a sobra
+  sobraParaEtapa   Etapa?   @relation("SobraFutura", fields: [sobraParaEtapaId], references: [id])
+
+  movimentosCompra   MovimentoEstoque[]
+  regraOuroMateriais RegraOuroMaterial[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("materiais_planejados")
+}
+
+model MaoDeObra {
+  id                    String             @id @default(uuid())
+  semanaId              String
+  semana                SemanaPlanejamento @relation(fields: [semanaId], references: [id], onDelete: Cascade)
+  etapaId               String
+  etapa                 Etapa              @relation(fields: [etapaId], references: [id])
+  equipeOuEmpreiteiro   String
+  servico               String
+  valorAcordado         Decimal            @db.Decimal(12, 2)
+  formaPagamento        String
+  dataPagamentoPrevista DateTime?          @db.Date
+  status                StatusPagamento    @default(PENDENTE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("mao_de_obra")
+}
+
+// "Regra de Ouro" — bloqueia uma Etapa de ser usável no Diário até status = LIBERADA
+model RegraOuro {
+  id              String    @id @default(uuid())
+  etapaId         String    @unique
+  etapa           Etapa     @relation(fields: [etapaId], references: [id], onDelete: Cascade)
+  atividade       String
+  escopoDetalhado String
+  tempoEstimado   String
+  valorFechado    Decimal   @db.Decimal(12, 2)
+  condicaoMeta    String // ex: "revisão do engenheiro"
+  dataLiberacao   DateTime? @db.Date
+  metodoConstrutivo String? // só preenchível/validável se criador.isEngenheiro = true (checado na server action)
+
+  aprovadoPorNome String?
+  aprovadoPorData DateTime? @db.Date
+
+  status StatusRegraOuro @default(RASCUNHO)
+
+  criadoPorId   String
+  criadoPor     User    @relation("CriadoPor", fields: [criadoPorId], references: [id])
+  aprovadoPorId String?
+  aprovadoPor   User?   @relation("AprovadoPor", fields: [aprovadoPorId], references: [id])
+
+  materiaisNecessarios RegraOuroMaterial[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("regras_ouro")
+}
+
+// Puxa de MaterialPlanejado (quantidade + onde usado + memorial já cadastrados) em vez de redigitar
+model RegraOuroMaterial {
+  id                  String            @id @default(uuid())
+  regraOuroId         String
+  regraOuro           RegraOuro         @relation(fields: [regraOuroId], references: [id], onDelete: Cascade)
+  materialPlanejadoId String
+  materialPlanejado   MaterialPlanejado @relation(fields: [materialPlanejadoId], references: [id])
+
+  @@unique([regraOuroId, materialPlanejadoId])
+  @@map("regra_ouro_materiais")
+}
+
+// ============================================================
+// MODULO 2: DIARIO DE OBRA
+// ============================================================
+
+model DiarioObra {
+  id              String   @id @default(uuid())
+  data            DateTime @unique @db.Date // um diário por dia (obra única)
+  preenchidoPorId String
+  preenchidoPor   User     @relation("DiarioPreenchidoPor", fields: [preenchidoPorId], references: [id])
+
+  avaliacaoNota        Int? // 1-5, preenchido ao fechar o dia
+  avaliacaoAderencia   String?
+  avaliacaoQualidade   String?
+  avaliacaoOrganizacao String?
+  avaliacaoSeguranca   String?
+
+  atividades      DiarioAtividade[]
+  materiaisUsados MaterialUsoDiario[]
+  imprevistos     Imprevisto[]
+  relatorios      Relatorio[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([data])
+  @@map("diarios_obra")
+}
+
+// Execução contra um item planejado. Liga Planejamento <-> Diário:
+// etapaDiaPlanejadoId -> EtapaDiaPlanejado (o que estava previsto)
+// diarioObraId        -> DiarioObra (em qual dia essa execução aconteceu)
+model DiarioAtividade {
+  id                  String            @id @default(uuid())
+  diarioObraId        String
+  diarioObra          DiarioObra        @relation(fields: [diarioObraId], references: [id], onDelete: Cascade)
+  etapaDiaPlanejadoId String
+  etapaDiaPlanejado   EtapaDiaPlanejado @relation(fields: [etapaDiaPlanejadoId], references: [id])
+
+  status        StatusAtividade @default(NAO_INICIADO)
+  oQueFoiFeito  String?
+  motivoImpacto String? // obrigatório na app se status = PARCIAL ou NAO_REALIZADO
+
+  midias              Midia[]
+  correcoesPendencias CorrecaoPendencia[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([diarioObraId, etapaDiaPlanejadoId]) // uma execução por atividade-planejada-do-dia
+  @@map("diario_atividades")
+}
+
+model Midia {
+  id                String          @id @default(uuid())
+  diarioAtividadeId String
+  diarioAtividade   DiarioAtividade @relation(fields: [diarioAtividadeId], references: [id], onDelete: Cascade)
+  tipo              TipoMidia
+  storagePath       String // caminho do objeto no Supabase Storage
+  timestamp         DateTime        @default(now())
+  legenda           String?
+
+  @@map("midias")
+}
+
+model MaterialUsoDiario {
+  id           String     @id @default(uuid())
+  diarioObraId String
+  diarioObra   DiarioObra @relation(fields: [diarioObraId], references: [id], onDelete: Cascade)
+  materialId   String
+  material     Material   @relation(fields: [materialId], references: [id])
+  quantidade   Decimal    @db.Decimal(12, 3)
+
+  movimentoEstoque MovimentoEstoque? // 1:1, criado na mesma transação (auto-débito)
+
+  createdAt DateTime @default(now())
+
+  @@map("materiais_uso_diario")
+}
+
+model Imprevisto {
+  id              String                @id @default(uuid())
+  diarioObraId    String
+  diarioObra      DiarioObra            @relation(fields: [diarioObraId], references: [id], onDelete: Cascade)
+  dataHora        DateTime              @default(now())
+  fotoStoragePath String?
+  descricao       String
+  gravidade       Gravidade
+  oQuePrecisa     NecessidadeImprevisto
+  urgencia        Gravidade
+
+  createdAt DateTime @default(now())
+
+  @@index([diarioObraId])
+  @@map("imprevistos")
+}
+
+// ============================================================
+// MODULO 3: ESTOQUE DE MATERIAL
+// Saldo é derivado (SUM entrada - SUM saida por materialId), nunca armazenado
+// como contador mutável — evita condição de corrida entre lançamentos concorrentes.
+// ============================================================
+
+model MovimentoEstoque {
+  id         String               @id @default(uuid())
+  materialId String
+  material   Material             @relation(fields: [materialId], references: [id])
+  tipo       TipoMovimentoEstoque
+  quantidade Decimal              @db.Decimal(12, 3)
+  data       DateTime             @default(now())
+  origemTipo OrigemMovimento
+
+  origemCompraId    String?            @unique
+  origemCompra      MaterialPlanejado? @relation(fields: [origemCompraId], references: [id])
+  origemUsoDiarioId String?            @unique
+  origemUsoDiario   MaterialUsoDiario? @relation(fields: [origemUsoDiarioId], references: [id])
+
+  observacao String?
+
+  createdAt DateTime @default(now())
+
+  @@index([materialId, data])
+  @@map("movimentos_estoque")
+}
+
+// ============================================================
+// MODULO 4: RELATORIOS
+// Log de auditoria dos exports gerados (os arquivos em si ficam no Supabase Storage).
+// ============================================================
+
+model Relatorio {
+  id           String           @id @default(uuid())
+  tipo         TipoRelatorio
+  formato      FormatoRelatorio
+  diarioObraId String?
+  diarioObra   DiarioObra?      @relation(fields: [diarioObraId], references: [id])
+  semanaId     String?
+
+  geradoPorId String
+  geradoPor   User     @relation(fields: [geradoPorId], references: [id])
+  geradoEm    DateTime @default(now())
+  storagePath String
+
+  @@map("relatorios")
+}

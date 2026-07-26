@@ -6,6 +6,7 @@ import {
   Boxes,
   FileBarChart,
   NotebookPen,
+  Map,
 } from "lucide-react";
 import { signOut } from "@/actions/auth.actions";
 import { InstallPrompt } from "@/components/offline/install-prompt";
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
   { href: "/diario", label: "Diário de Obra", icon: NotebookPen },
   { href: "/planejamento", label: "Planejamento Semanal", icon: CalendarRange },
   { href: "/estoque", label: "Estoque de Material", icon: Boxes },
+  { href: "/planta", label: "Planta da Obra", icon: Map },
   { href: "/relatorios", label: "Relatórios", icon: FileBarChart },
 ];
 

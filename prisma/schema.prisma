@@ -107,6 +107,7 @@ model User {
   regrasOuroAprovadas RegraOuro[]          @relation("AprovadoPor")
   regrasOuroCriadas   RegraOuro[]          @relation("CriadoPor")
   relatoriosGerados   Relatorio[]
+  anotacoesPlanta     AnotacaoPlanta[]
 
   @@map("users")
 }
@@ -151,6 +152,7 @@ model Etapa {
   maoDeObra           MaoDeObra[]
   correcoesPendencias CorrecaoPendencia[]
   sobrasDirecionadas  MaterialPlanejado[] @relation("SobraFutura")
+  anotacoesPlanta     AnotacaoPlanta[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -220,16 +222,16 @@ model VisitaTecnica {
 
 // Alimentada por VisitaTecnica OU pelo dia a dia de campo (DiarioAtividade)
 model CorrecaoPendencia {
-  id                    String            @id @default(uuid())
-  numero                Int               @unique @default(autoincrement())
-  dataIdentificacao     DateTime          @db.Date
+  id                    String              @id @default(uuid())
+  numero                Int                 @unique @default(autoincrement())
+  dataIdentificacao     DateTime            @db.Date
   origemTipo            OrigemPendencia
   visitaId              String?
-  visita                VisitaTecnica?    @relation(fields: [visitaId], references: [id])
+  visita                VisitaTecnica?      @relation(fields: [visitaId], references: [id])
   diarioAtividadeId     String?
-  diarioAtividade       DiarioAtividade?  @relation(fields: [diarioAtividadeId], references: [id])
+  diarioAtividade       DiarioAtividade?    @relation(fields: [diarioAtividadeId], references: [id])
   etapaId               String?
-  etapa                 Etapa?            @relation(fields: [etapaId], references: [id])
+  etapa                 Etapa?              @relation(fields: [etapaId], references: [id])
   problemaOuSolicitacao String
   correcaoAprovada      String?
   dependeDeId           String?
@@ -310,15 +312,15 @@ model MaoDeObra {
 
 // "Regra de Ouro" — bloqueia uma Etapa de ser usável no Diário até status = LIBERADA
 model RegraOuro {
-  id              String    @id @default(uuid())
-  etapaId         String    @unique
-  etapa           Etapa     @relation(fields: [etapaId], references: [id], onDelete: Cascade)
-  atividade       String
-  escopoDetalhado String
-  tempoEstimado   String
-  valorFechado    Decimal   @db.Decimal(12, 2)
-  condicaoMeta    String // ex: "revisão do engenheiro"
-  dataLiberacao   DateTime? @db.Date
+  id                String    @id @default(uuid())
+  etapaId           String    @unique
+  etapa             Etapa     @relation(fields: [etapaId], references: [id], onDelete: Cascade)
+  atividade         String
+  escopoDetalhado   String
+  tempoEstimado     String
+  valorFechado      Decimal   @db.Decimal(12, 2)
+  condicaoMeta      String // ex: "revisão do engenheiro"
+  dataLiberacao     DateTime? @db.Date
   metodoConstrutivo String? // só preenchível/validável se criador.isEngenheiro = true (checado na server action)
 
   aprovadoPorNome String?
@@ -443,8 +445,47 @@ model Imprevisto {
 
   createdAt DateTime @default(now())
 
+  anotacoesPlanta AnotacaoPlanta[]
+
   @@index([diarioObraId])
   @@map("imprevistos")
+}
+
+// ============================================================
+// PLANTA DA OBRA: imagem de referência + anotações (traço livre) por cima,
+// vinculadas opcionalmente a uma Etapa ou a um Imprevisto.
+// ============================================================
+
+model PlantaObra {
+  id          String   @id @default(uuid())
+  nome        String
+  storagePath String
+  createdAt   DateTime @default(now())
+
+  anotacoes AnotacaoPlanta[]
+
+  @@map("plantas_obra")
+}
+
+model AnotacaoPlanta {
+  id          String     @id @default(uuid())
+  plantaId    String
+  planta      PlantaObra @relation(fields: [plantaId], references: [id], onDelete: Cascade)
+  storagePath String // planta + traços já mesclados num único PNG
+
+  etapaId String?
+  etapa   Etapa?  @relation(fields: [etapaId], references: [id])
+
+  imprevistoId String?
+  imprevisto   Imprevisto? @relation(fields: [imprevistoId], references: [id])
+
+  criadoPorId String
+  criadoPor   User   @relation(fields: [criadoPorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([plantaId])
+  @@map("anotacoes_planta")
 }
 
 // ============================================================

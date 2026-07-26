@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { NotebookPen, AlertTriangle } from "lucide-react";
+import { NotebookPen, AlertTriangle, Map } from "lucide-react";
 import { signOut } from "@/actions/auth.actions";
 import { SyncManager } from "@/components/offline/sync-manager";
 import { SyncIndicator } from "@/components/offline/sync-indicator";
@@ -42,6 +42,13 @@ export default function CampoLayout({
         >
           <AlertTriangle className="size-5" />
           Imprevisto
+        </Link>
+        <Link
+          href="/planta"
+          className="flex flex-1 flex-col items-center gap-0.5 py-2.5 text-xs text-muted-foreground"
+        >
+          <Map className="size-5" />
+          Planta
         </Link>
       </nav>
     </div>

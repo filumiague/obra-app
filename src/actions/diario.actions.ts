@@ -325,6 +325,41 @@ export async function addMaterialUso(input: {
   return { error: null };
 }
 
+export async function editarMaterialUso(input: {
+  id: string;
+  materialId: string;
+  quantidade: number;
+}) {
+  await requireUser();
+  if (!input.materialId || !(input.quantidade > 0)) {
+    return { error: "Selecione um material e uma quantidade válida." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.materialUsoDiario.update({
+      where: { id: input.id },
+      data: { materialId: input.materialId, quantidade: input.quantidade },
+    });
+    await tx.movimentoEstoque.updateMany({
+      where: { origemUsoDiarioId: input.id },
+      data: { materialId: input.materialId, quantidade: input.quantidade },
+    });
+  });
+
+  revalidatePath("/diario");
+  return { error: null };
+}
+
+export async function apagarMaterialUso(id: string) {
+  await requireUser();
+  await prisma.$transaction(async (tx) => {
+    await tx.movimentoEstoque.deleteMany({ where: { origemUsoDiarioId: id } });
+    await tx.materialUsoDiario.delete({ where: { id } });
+  });
+  revalidatePath("/diario");
+  return { error: null };
+}
+
 export async function addImprevisto(formData: FormData) {
   await requireUser();
   const id = formData.get("id") ? String(formData.get("id")) : randomUUID();
@@ -374,6 +409,19 @@ export async function addImprevisto(formData: FormData) {
     },
   });
 
+  revalidatePath("/diario");
+  revalidatePath("/imprevisto");
+  return { error: null };
+}
+
+export async function apagarImprevisto(id: string) {
+  await requireUser();
+  const imprevisto = await prisma.imprevisto.findUniqueOrThrow({ where: { id } });
+  if (imprevisto.fotoStoragePath) {
+    const admin = createAdminClient();
+    await admin.storage.from("midias").remove([imprevisto.fotoStoragePath]);
+  }
+  await prisma.imprevisto.delete({ where: { id } });
   revalidatePath("/diario");
   revalidatePath("/imprevisto");
   return { error: null };

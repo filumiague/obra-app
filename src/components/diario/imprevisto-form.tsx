@@ -8,33 +8,15 @@ import { tryOrQueue } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-
-const GRAVIDADE_LABELS: Record<string, string> = {
-  BAIXA: "Baixa",
-  MEDIA: "Média",
-  ALTA: "Alta",
-};
-
-const O_QUE_PRECISA_LABELS: Record<string, string> = {
-  MATERIAL: "Material",
-  DECISAO: "Decisão",
-  MAO_DE_OBRA: "Mão de obra",
-  OUTRO: "Outro",
-};
 
 export function ImprevistoForm({
   diarioObraId,
   onSuccess,
+  onCancel,
 }: {
   diarioObraId: string;
   onSuccess?: () => void;
+  onCancel?: () => void;
 }) {
   const [isPending, startTransition] = useTransition();
   const [gravidade, setGravidade] = useState("MEDIA");
@@ -99,47 +81,47 @@ export function ImprevistoForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
-          <Label>Gravidade</Label>
-          <Select value={gravidade} onValueChange={(v) => setGravidade(v ?? "MEDIA")}>
-            <SelectTrigger className="w-full">
-              <SelectValue>{(v: string | null) => GRAVIDADE_LABELS[v ?? ""] ?? ""}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="BAIXA">Baixa</SelectItem>
-              <SelectItem value="MEDIA">Média</SelectItem>
-              <SelectItem value="ALTA">Alta</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor="gravidade">Gravidade</Label>
+          <select
+            id="gravidade"
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={gravidade}
+            onChange={(e) => setGravidade(e.target.value)}
+          >
+            <option value="BAIXA">Baixa</option>
+            <option value="MEDIA">Média</option>
+            <option value="ALTA">Alta</option>
+          </select>
         </div>
 
         <div className="space-y-2">
-          <Label>Urgência</Label>
-          <Select value={urgencia} onValueChange={(v) => setUrgencia(v ?? "MEDIA")}>
-            <SelectTrigger className="w-full">
-              <SelectValue>{(v: string | null) => GRAVIDADE_LABELS[v ?? ""] ?? ""}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="BAIXA">Baixa</SelectItem>
-              <SelectItem value="MEDIA">Média</SelectItem>
-              <SelectItem value="ALTA">Alta</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor="urgencia">Urgência</Label>
+          <select
+            id="urgencia"
+            className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+            value={urgencia}
+            onChange={(e) => setUrgencia(e.target.value)}
+          >
+            <option value="BAIXA">Baixa</option>
+            <option value="MEDIA">Média</option>
+            <option value="ALTA">Alta</option>
+          </select>
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label>O que precisa</Label>
-        <Select value={oQuePrecisa} onValueChange={(v) => setOQuePrecisa(v ?? "DECISAO")}>
-          <SelectTrigger className="w-full">
-            <SelectValue>{(v: string | null) => O_QUE_PRECISA_LABELS[v ?? ""] ?? ""}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="MATERIAL">Material</SelectItem>
-            <SelectItem value="DECISAO">Decisão</SelectItem>
-            <SelectItem value="MAO_DE_OBRA">Mão de obra</SelectItem>
-            <SelectItem value="OUTRO">Outro</SelectItem>
-          </SelectContent>
-        </Select>
+        <Label htmlFor="oQuePrecisa">O que precisa</Label>
+        <select
+          id="oQuePrecisa"
+          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+          value={oQuePrecisa}
+          onChange={(e) => setOQuePrecisa(e.target.value)}
+        >
+          <option value="MATERIAL">Material</option>
+          <option value="DECISAO">Decisão</option>
+          <option value="MAO_DE_OBRA">Mão de obra</option>
+          <option value="OUTRO">Outro</option>
+        </select>
       </div>
 
       <div className="space-y-2">
@@ -153,9 +135,16 @@ export function ImprevistoForm({
         />
       </div>
 
-      <Button type="submit" disabled={isPending} className="w-full" size="lg">
-        {isPending ? "Enviando..." : "Reportar imprevisto"}
-      </Button>
+      <div className="flex gap-2">
+        {onCancel && (
+          <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
+            Cancelar
+          </Button>
+        )}
+        <Button type="submit" disabled={isPending} className="flex-1" size="lg">
+          {isPending ? "Enviando..." : "Reportar imprevisto"}
+        </Button>
+      </div>
     </form>
   );
 }

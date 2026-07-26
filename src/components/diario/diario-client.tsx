@@ -10,13 +10,17 @@ import {
   History,
   Trash2,
   CalendarPlus,
+  Pencil,
 } from "lucide-react";
 import {
   addMaterialUso,
+  editarMaterialUso,
+  apagarMaterialUso,
   setAvaliacaoDia,
   criarMaterial,
   apagarDiario,
   criarDiario,
+  apagarImprevisto,
 } from "@/actions/diario.actions";
 import { tryOrQueue } from "@/lib/offline/sync";
 import { AtividadeCard } from "@/components/diario/atividade-card";
@@ -25,13 +29,6 @@ import { RelatorioExport } from "@/components/relatorios/relatorio-export";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -149,6 +146,7 @@ export function DiarioClient({ data }: { data: DiarioData }) {
           <ImprevistoForm
             diarioObraId={data.diario.id}
             onSuccess={() => setImprevistoOpen(false)}
+            onCancel={() => setImprevistoOpen(false)}
           />
         </DialogContent>
       </Dialog>
@@ -156,13 +154,14 @@ export function DiarioClient({ data }: { data: DiarioData }) {
   );
 }
 
-const NOVO_MATERIAL_VALUE = "__novo__";
+const VISIVEIS_SEM_EXPANDIR = 10;
 
 function MaterialUsoSection({ data }: { data: DiarioData }) {
   const [materiais, setMateriais] = useState(data.materiais);
   const [materialId, setMaterialId] = useState("");
   const [quantidade, setQuantidade] = useState("");
   const [novoMaterialOpen, setNovoMaterialOpen] = useState(false);
+  const [verTodosOpen, setVerTodosOpen] = useState(false);
   const [novoNome, setNovoNome] = useState("");
   const [novoUnidade, setNovoUnidade] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -171,8 +170,12 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
 
   function handleAdd() {
     const qtd = Number(quantidade.replace(",", "."));
-    if (!materialId || !qtd || qtd <= 0) {
-      toast.error("Selecione um material e informe uma quantidade válida.");
+    if (!materialId) {
+      toast.error("Selecione um material na lista antes de adicionar.");
+      return;
+    }
+    if (!qtd || qtd <= 0) {
+      toast.error("Informe uma quantidade válida.");
       return;
     }
     const payload = { diarioObraId: data.diario.id, materialId, quantidade: qtd };
@@ -221,15 +224,18 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
     });
   }
 
+  const usados = data.materiaisUsados;
+  const visiveis = usados.slice(0, VISIVEIS_SEM_EXPANDIR);
+
   return (
     <Card>
       <CardHeader>
         <h2 className="font-semibold">Material usado hoje</h2>
       </CardHeader>
       <CardContent className="space-y-3">
-        {data.materiaisUsados.length > 0 && (
+        {usados.length > 0 && (
           <ul className="space-y-1 text-sm">
-            {data.materiaisUsados.map((m) => (
+            {visiveis.map((m) => (
               <li key={m.id} className="flex justify-between text-muted-foreground">
                 <span>{m.material.nome}</span>
                 <span>
@@ -240,35 +246,29 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
           </ul>
         )}
 
-        <div className="flex gap-2">
-          <Select
-            value={materialId}
-            onValueChange={(v) => {
-              if (v === NOVO_MATERIAL_VALUE) {
-                setNovoMaterialOpen(true);
-                return;
-              }
-              setMaterialId(v ?? "");
-            }}
+        {usados.length > VISIVEIS_SEM_EXPANDIR && (
+          <button
+            type="button"
+            className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+            onClick={() => setVerTodosOpen(true)}
           >
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Material">
-                {(value: string | null) =>
-                  materiais.find((m) => m.id === value)?.nome ?? "Material"
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {materiais.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.nome} ({m.unidade})
-                </SelectItem>
-              ))}
-              <SelectItem value={NOVO_MATERIAL_VALUE} className="font-medium text-primary">
-                + Novo material...
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            Ver mais ({usados.length} itens)
+          </button>
+        )}
+
+        <div className="flex gap-2">
+          <select
+            className="h-8 flex-1 rounded-lg border border-input bg-background px-2 text-sm"
+            value={materialId}
+            onChange={(e) => setMaterialId(e.target.value)}
+          >
+            <option value="">Selecione o material</option>
+            {materiais.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.nome} ({m.unidade})
+              </option>
+            ))}
+          </select>
           <Input
             className="w-20"
             placeholder="Qtd"
@@ -276,10 +276,18 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
             value={quantidade}
             onChange={(e) => setQuantidade(e.target.value)}
           />
-          <Button type="button" disabled={isPending} onClick={handleAdd}>
+          <Button type="button" disabled={isPending} onClick={handleAdd} title="Adicionar">
             <Plus className="size-4" />
           </Button>
         </div>
+
+        <button
+          type="button"
+          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+          onClick={() => setNovoMaterialOpen(true)}
+        >
+          + Cadastrar novo material
+        </button>
       </CardContent>
 
       <Dialog open={novoMaterialOpen} onOpenChange={setNovoMaterialOpen}>
@@ -304,14 +312,37 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
                 placeholder="Ex: m3, un, saco, kg"
               />
             </div>
-            <Button
-              type="button"
-              className="w-full"
-              disabled={isCreating}
-              onClick={handleCriarMaterial}
-            >
-              {isCreating ? "Criando..." : "Cadastrar material"}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={() => setNovoMaterialOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                className="flex-1"
+                disabled={isCreating}
+                onClick={handleCriarMaterial}
+              >
+                {isCreating ? "Criando..." : "Cadastrar"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={verTodosOpen} onOpenChange={setVerTodosOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Materiais usados hoje ({usados.length})</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1">
+            {usados.map((m) => (
+              <MaterialUsoRow key={m.id} item={m} materiais={materiais} />
+            ))}
           </div>
         </DialogContent>
       </Dialog>
@@ -319,11 +350,121 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
   );
 }
 
-function ImprevistosList({
+function MaterialUsoRow({
+  item,
+  materiais,
+}: {
+  item: DiarioData["materiaisUsados"][number];
+  materiais: DiarioData["materiais"];
+}) {
+  const [editing, setEditing] = useState(false);
+  const [materialId, setMaterialId] = useState(item.materialId);
+  const [quantidade, setQuantidade] = useState(String(item.quantidade));
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleSalvar() {
+    const qtd = Number(quantidade.replace(",", "."));
+    if (!qtd || qtd <= 0) {
+      toast.error("Informe uma quantidade válida.");
+      return;
+    }
+    startTransition(async () => {
+      const result = await editarMaterialUso({ id: item.id, materialId, quantidade: qtd });
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Atualizado.");
+      setEditing(false);
+      router.refresh();
+    });
+  }
+
+  function handleApagar() {
+    if (!confirm(`Apagar o uso de "${item.material.nome}"?`)) return;
+    startTransition(async () => {
+      const result = await apagarMaterialUso(item.id);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Item apagado.");
+      router.refresh();
+    });
+  }
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border p-2">
+        <select
+          className="h-8 flex-1 rounded-lg border border-input bg-background px-2 text-sm"
+          value={materialId}
+          onChange={(e) => setMaterialId(e.target.value)}
+        >
+          {materiais.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.nome} ({m.unidade})
+            </option>
+          ))}
+        </select>
+        <Input
+          className="w-20"
+          inputMode="decimal"
+          value={quantidade}
+          onChange={(e) => setQuantidade(e.target.value)}
+        />
+        <Button size="sm" disabled={isPending} onClick={handleSalvar}>
+          Salvar
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+          Cancelar
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+      <div>
+        <span className="font-medium">{item.material.nome}</span>{" "}
+        <span className="text-muted-foreground">
+          {item.quantidade.toString()} {item.material.unidade}
+        </span>
+      </div>
+      <div className="flex shrink-0 gap-1">
+        <Button size="icon-sm" variant="outline" onClick={() => setEditing(true)}>
+          <Pencil className="size-3.5" />
+        </Button>
+        <Button size="icon-sm" variant="outline" disabled={isPending} onClick={handleApagar}>
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function ImprevistosList({
   imprevistos,
 }: {
   imprevistos: DiarioData["imprevistos"];
 }) {
+  const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
+  function handleApagar(id: string, descricao: string) {
+    if (!confirm(`Apagar o imprevisto "${descricao}"?`)) return;
+    startTransition(async () => {
+      const result = await apagarImprevisto(id);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Imprevisto apagado.");
+      router.refresh();
+    });
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -332,11 +473,21 @@ function ImprevistosList({
       <CardContent className="space-y-2">
         {imprevistos.map((i) => (
           <div key={i.id} className="rounded-md border p-2 text-sm">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="font-medium">{i.descricao}</span>
-              <span className="text-xs text-muted-foreground">
-                {i.gravidade} · {i.urgencia}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {i.gravidade} · {i.urgencia}
+                </span>
+                <Button
+                  size="icon-sm"
+                  variant="outline"
+                  disabled={isPending}
+                  onClick={() => handleApagar(i.id, i.descricao)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
             </div>
             {i.fotoUrl && (
               // eslint-disable-next-line @next/next/no-img-element

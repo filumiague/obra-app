@@ -1,6 +1,7 @@
 import { getDiarioHoje } from "@/actions/diario.actions";
 import { ImprevistoForm } from "@/components/diario/imprevisto-form";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { ImprevistosList } from "@/components/diario/diario-client";
+import { Card, CardContent } from "@/components/ui/card";
 
 export default async function ImprevistoPage() {
   const { diario, imprevistos } = await getDiarioHoje();
@@ -20,25 +21,7 @@ export default async function ImprevistoPage() {
         </CardContent>
       </Card>
 
-      {imprevistos.length > 0 && (
-        <Card>
-          <CardHeader>
-            <h2 className="font-semibold">Imprevistos de hoje</h2>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {imprevistos.map((i) => (
-              <div key={i.id} className="rounded-md border p-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{i.descricao}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {i.gravidade} · {i.urgencia}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      {imprevistos.length > 0 && <ImprevistosList imprevistos={imprevistos} />}
     </div>
   );
 }

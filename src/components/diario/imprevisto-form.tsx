@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { addImprevisto } from "@/actions/diario.actions";
+import { tryOrQueue } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -41,9 +42,30 @@ export function ImprevistoForm({ onSuccess }: { onSuccess?: () => void }) {
     formData.set("urgencia", urgencia);
     formData.set("oQuePrecisa", oQuePrecisa);
 
+    const file = formData.get("file");
+    const payload = {
+      descricao: String(formData.get("descricao") ?? ""),
+      gravidade,
+      urgencia,
+      oQuePrecisa,
+    };
+
     startTransition(async () => {
-      const result = await addImprevisto(formData);
-      if (result.error) {
+      const { queued, result } = await tryOrQueue(() => addImprevisto(formData), {
+        kind: "imprevisto",
+        payload,
+        fileBlob: file instanceof File && file.size > 0 ? file : undefined,
+        fileName: file instanceof File ? file.name : undefined,
+      });
+      if (queued) {
+        toast.success(
+          "Imprevisto salvo localmente — será enviado quando a conexão voltar.",
+        );
+        formRef.current?.reset();
+        onSuccess?.();
+        return;
+      }
+      if (result?.error) {
         toast.error(result.error);
         return;
       }

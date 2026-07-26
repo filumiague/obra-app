@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { signOut } from "@/actions/auth.actions";
+import { InstallPrompt } from "@/components/offline/install-prompt";
 
 export default function GestorLayout({
   children,
@@ -20,6 +21,7 @@ export default function GestorLayout({
           </button>
         </form>
       </header>
+      <InstallPrompt />
       <div className="flex flex-1">
         <aside className="w-56 shrink-0 border-r p-4">
           <nav className="flex flex-col gap-2 text-sm">

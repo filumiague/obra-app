@@ -146,11 +146,19 @@ export async function updateAtividadeStatus(input: {
 
 export async function addMidia(formData: FormData) {
   const user = await requireUser();
+  const id = formData.get("id") ? String(formData.get("id")) : randomUUID();
   const etapaDiaPlanejadoId = String(formData.get("etapaDiaPlanejadoId"));
   const legenda = formData.get("legenda") ? String(formData.get("legenda")) : null;
   const file = formData.get("file") as File | null;
 
   if (!file || file.size === 0) return { error: "Nenhum arquivo selecionado." };
+
+  // Idempotent replay: if the offline sync retries this item, don't re-upload.
+  const existing = await prisma.midia.findUnique({ where: { id } });
+  if (existing) {
+    revalidatePath("/diario");
+    return { error: null };
+  }
 
   const plano = await prisma.etapaDiaPlanejado.findUniqueOrThrow({
     where: { id: etapaDiaPlanejadoId },
@@ -190,6 +198,7 @@ export async function addMidia(formData: FormData) {
 
   await prisma.midia.create({
     data: {
+      id,
       diarioAtividadeId: atividade.id,
       tipo,
       storagePath: path,
@@ -201,24 +210,34 @@ export async function addMidia(formData: FormData) {
   return { error: null };
 }
 
-export async function addMaterialUso(input: { materialId: string; quantidade: number }) {
+export async function addMaterialUso(input: {
+  id?: string;
+  materialId: string;
+  quantidade: number;
+}) {
   const user = await requireUser();
   if (!input.materialId || !(input.quantidade > 0)) {
     return { error: "Selecione um material e uma quantidade válida." };
   }
 
   const diario = await getOrCreateDiarioHoje(user.id);
+  const id = input.id ?? randomUUID();
 
   await prisma.$transaction(async (tx) => {
-    const uso = await tx.materialUsoDiario.create({
-      data: {
+    const uso = await tx.materialUsoDiario.upsert({
+      where: { id },
+      update: {},
+      create: {
+        id,
         diarioObraId: diario.id,
         materialId: input.materialId,
         quantidade: input.quantidade,
       },
     });
-    await tx.movimentoEstoque.create({
-      data: {
+    await tx.movimentoEstoque.upsert({
+      where: { origemUsoDiarioId: uso.id },
+      update: {},
+      create: {
         materialId: input.materialId,
         tipo: "SAIDA",
         quantidade: input.quantidade,
@@ -234,6 +253,7 @@ export async function addMaterialUso(input: { materialId: string; quantidade: nu
 
 export async function addImprevisto(formData: FormData) {
   const user = await requireUser();
+  const id = formData.get("id") ? String(formData.get("id")) : randomUUID();
   const descricao = String(formData.get("descricao") ?? "").trim();
   const gravidade = String(formData.get("gravidade") ?? "");
   const urgencia = String(formData.get("urgencia") ?? "");
@@ -241,6 +261,14 @@ export async function addImprevisto(formData: FormData) {
   const file = formData.get("file") as File | null;
 
   if (!descricao) return { error: "Descreva o imprevisto." };
+
+  // Idempotent replay: if the offline sync retries this item, don't re-upload.
+  const existing = await prisma.imprevisto.findUnique({ where: { id } });
+  if (existing) {
+    revalidatePath("/diario");
+    revalidatePath("/imprevisto");
+    return { error: null };
+  }
 
   const diario = await getOrCreateDiarioHoje(user.id);
 
@@ -258,6 +286,7 @@ export async function addImprevisto(formData: FormData) {
 
   await prisma.imprevisto.create({
     data: {
+      id,
       diarioObraId: diario.id,
       descricao,
       gravidade: gravidade as "BAIXA" | "MEDIA" | "ALTA",

@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { updateAtividadeStatus, addMidia } from "@/actions/diario.actions";
+import { tryOrQueue } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -60,14 +61,22 @@ export function AtividadeCard({ item }: { item: Item }) {
       toast.error("Descreva o motivo/impacto antes de salvar.");
       return;
     }
+    const payload = {
+      etapaDiaPlanejadoId: item.id,
+      status,
+      oQueFoiFeito: oQueFoiFeito || null,
+      motivoImpacto: requiresMotivo ? motivoImpacto : null,
+    };
     startTransition(async () => {
-      const result = await updateAtividadeStatus({
-        etapaDiaPlanejadoId: item.id,
-        status,
-        oQueFoiFeito: oQueFoiFeito || null,
-        motivoImpacto: requiresMotivo ? motivoImpacto : null,
-      });
-      if (result.error) {
+      const { queued, result } = await tryOrQueue(
+        () => updateAtividadeStatus(payload),
+        { kind: "status", payload },
+      );
+      if (queued) {
+        toast.success("Salvo localmente — será sincronizado quando a conexão voltar.");
+        return;
+      }
+      if (result?.error) {
         toast.error(result.error);
         return;
       }
@@ -79,12 +88,24 @@ export function AtividadeCard({ item }: { item: Item }) {
   function handleFileChange() {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    const formData = new FormData();
-    formData.set("etapaDiaPlanejadoId", item.id);
-    formData.set("file", file);
     startUpload(async () => {
-      const result = await addMidia(formData);
-      if (result.error) {
+      const { queued, result } = await tryOrQueue(
+        async () => {
+          const formData = new FormData();
+          formData.set("etapaDiaPlanejadoId", item.id);
+          formData.set("file", file);
+          return addMidia(formData);
+        },
+        {
+          kind: "midia",
+          payload: { etapaDiaPlanejadoId: item.id },
+          fileBlob: file,
+          fileName: file.name,
+        },
+      );
+      if (queued) {
+        toast.success("Mídia salva localmente — será enviada quando a conexão voltar.");
+      } else if (result?.error) {
         toast.error(result.error);
       } else {
         toast.success("Mídia adicionada.");

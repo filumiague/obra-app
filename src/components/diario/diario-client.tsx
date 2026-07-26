@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertTriangle } from "lucide-react";
 import { addMaterialUso, setAvaliacaoDia } from "@/actions/diario.actions";
+import { tryOrQueue } from "@/lib/offline/sync";
 import { AtividadeCard } from "@/components/diario/atividade-card";
 import { ImprevistoForm } from "@/components/diario/imprevisto-form";
 import { RelatorioExport } from "@/components/relatorios/relatorio-export";
@@ -124,9 +125,19 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
       toast.error("Selecione um material e informe uma quantidade válida.");
       return;
     }
+    const payload = { materialId, quantidade: qtd };
     startTransition(async () => {
-      const result = await addMaterialUso({ materialId, quantidade: qtd });
-      if (result.error) {
+      const { queued, result } = await tryOrQueue(
+        () => addMaterialUso(payload),
+        { kind: "material", payload },
+      );
+      if (queued) {
+        toast.success("Salvo localmente — será sincronizado quando a conexão voltar.");
+        setMaterialId("");
+        setQuantidade("");
+        return;
+      }
+      if (result?.error) {
         toast.error(result.error);
         return;
       }

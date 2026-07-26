@@ -29,10 +29,65 @@ async function getOrCreateDiarioHoje(preenchidoPorId: string) {
 export async function getDiarioHoje() {
   const user = await requireUser();
   const diario = await getOrCreateDiarioHoje(user.id);
-  const hoje = startOfDayUTC(new Date());
+  return getDiarioPorId(diario.id);
+}
+
+export async function criarDiario(dataStr: string) {
+  const user = await requireUser();
+  const data = startOfDayUTC(new Date(`${dataStr}T00:00:00Z`));
+  const diario = await prisma.diarioObra.upsert({
+    where: { data },
+    update: {},
+    create: { data, preenchidoPorId: user.id },
+  });
+  revalidatePath("/diario/historico");
+  redirect(`/diario/${diario.id}`);
+}
+
+export async function apagarDiario(diarioObraId: string) {
+  await requireUser();
+  await prisma.$transaction(async (tx) => {
+    const usos = await tx.materialUsoDiario.findMany({
+      where: { diarioObraId },
+      select: { id: true },
+    });
+    const usoIds = usos.map((u) => u.id);
+    if (usoIds.length) {
+      await tx.movimentoEstoque.deleteMany({ where: { origemUsoDiarioId: { in: usoIds } } });
+    }
+    await tx.relatorio.deleteMany({ where: { diarioObraId } });
+    await tx.diarioObra.delete({ where: { id: diarioObraId } });
+  });
+  revalidatePath("/diario/historico");
+  redirect("/diario/historico");
+}
+
+export async function listDiarios() {
+  await requireUser();
+  const diarios = await prisma.diarioObra.findMany({
+    orderBy: { data: "desc" },
+    include: {
+      atividades: {
+        include: { etapaDiaPlanejado: { include: { etapa: true } } },
+      },
+    },
+  });
+  return diarios.map((d) => ({
+    id: d.id,
+    data: d.data,
+    updatedAt: d.updatedAt,
+    etapas: Array.from(new Set(d.atividades.map((a) => a.etapaDiaPlanejado.etapa.nome))),
+    avaliacaoNota: d.avaliacaoNota,
+  }));
+}
+
+export async function getDiarioPorId(diarioObraId: string) {
+  await requireUser();
+  const diario = await prisma.diarioObra.findUniqueOrThrow({ where: { id: diarioObraId } });
+  const dia = startOfDayUTC(new Date(diario.data));
 
   const itensPlanejados = await prisma.etapaDiaPlanejado.findMany({
-    where: { data: hoje, etapa: { regraOuro: { status: "LIBERADA" } } },
+    where: { data: dia, etapa: { regraOuro: { status: "LIBERADA" } } },
     include: {
       etapa: true,
       subEtapas: { orderBy: { ordem: "asc" } },
@@ -95,12 +150,13 @@ export async function getDiarioHoje() {
 }
 
 export async function updateAtividadeStatus(input: {
+  diarioObraId: string;
   etapaDiaPlanejadoId: string;
   status: "NAO_INICIADO" | "EM_ANDAMENTO" | "CONCLUIDO" | "PARCIAL" | "NAO_REALIZADO";
   oQueFoiFeito: string | null;
   motivoImpacto: string | null;
 }) {
-  const user = await requireUser();
+  await requireUser();
 
   const plano = await prisma.etapaDiaPlanejado.findUniqueOrThrow({
     where: { id: input.etapaDiaPlanejadoId },
@@ -117,7 +173,7 @@ export async function updateAtividadeStatus(input: {
     return { error: "Motivo/impacto é obrigatório quando o status é parcial ou não realizado." };
   }
 
-  const diario = await getOrCreateDiarioHoje(user.id);
+  const diario = await prisma.diarioObra.findUniqueOrThrow({ where: { id: input.diarioObraId } });
 
   await prisma.diarioAtividade.upsert({
     where: {
@@ -145,8 +201,9 @@ export async function updateAtividadeStatus(input: {
 }
 
 export async function addMidia(formData: FormData) {
-  const user = await requireUser();
+  await requireUser();
   const id = formData.get("id") ? String(formData.get("id")) : randomUUID();
+  const diarioObraId = String(formData.get("diarioObraId"));
   const etapaDiaPlanejadoId = String(formData.get("etapaDiaPlanejadoId"));
   const legenda = formData.get("legenda") ? String(formData.get("legenda")) : null;
   const file = formData.get("file") as File | null;
@@ -168,7 +225,7 @@ export async function addMidia(formData: FormData) {
     return { error: "Esta etapa ainda não foi liberada (Regra de Ouro)." };
   }
 
-  const diario = await getOrCreateDiarioHoje(user.id);
+  const diario = await prisma.diarioObra.findUniqueOrThrow({ where: { id: diarioObraId } });
 
   const atividade = await prisma.diarioAtividade.upsert({
     where: {
@@ -210,17 +267,34 @@ export async function addMidia(formData: FormData) {
   return { error: null };
 }
 
+export async function criarMaterial(input: { nome: string; unidade: string }) {
+  await requireUser();
+  const nome = input.nome.trim();
+  const unidade = input.unidade.trim();
+  if (!nome || !unidade) {
+    return { error: "Informe nome e unidade do material." };
+  }
+  const material = await prisma.material.upsert({
+    where: { nome },
+    update: {},
+    create: { nome, unidade },
+  });
+  revalidatePath("/diario");
+  return { error: null, material };
+}
+
 export async function addMaterialUso(input: {
   id?: string;
+  diarioObraId: string;
   materialId: string;
   quantidade: number;
 }) {
-  const user = await requireUser();
+  await requireUser();
   if (!input.materialId || !(input.quantidade > 0)) {
     return { error: "Selecione um material e uma quantidade válida." };
   }
 
-  const diario = await getOrCreateDiarioHoje(user.id);
+  const diario = await prisma.diarioObra.findUniqueOrThrow({ where: { id: input.diarioObraId } });
   const id = input.id ?? randomUUID();
 
   await prisma.$transaction(async (tx) => {
@@ -252,8 +326,9 @@ export async function addMaterialUso(input: {
 }
 
 export async function addImprevisto(formData: FormData) {
-  const user = await requireUser();
+  await requireUser();
   const id = formData.get("id") ? String(formData.get("id")) : randomUUID();
+  const diarioObraId = String(formData.get("diarioObraId"));
   const descricao = String(formData.get("descricao") ?? "").trim();
   const gravidade = String(formData.get("gravidade") ?? "");
   const urgencia = String(formData.get("urgencia") ?? "");
@@ -270,7 +345,10 @@ export async function addImprevisto(formData: FormData) {
     return { error: null };
   }
 
-  const diario = await getOrCreateDiarioHoje(user.id);
+  const user = await requireUser();
+  const diario = diarioObraId
+    ? await prisma.diarioObra.findUniqueOrThrow({ where: { id: diarioObraId } })
+    : await getOrCreateDiarioHoje(user.id);
 
   let fotoStoragePath: string | null = null;
   if (file && file.size > 0) {
@@ -302,17 +380,17 @@ export async function addImprevisto(formData: FormData) {
 }
 
 export async function setAvaliacaoDia(input: {
+  diarioObraId: string;
   nota: number;
   aderencia: string;
   qualidade: string;
   organizacao: string;
   seguranca: string;
 }) {
-  const user = await requireUser();
-  const diario = await getOrCreateDiarioHoje(user.id);
+  await requireUser();
 
   await prisma.diarioObra.update({
-    where: { id: diario.id },
+    where: { id: input.diarioObraId },
     data: {
       avaliacaoNota: input.nota,
       avaliacaoAderencia: input.aderencia || null,

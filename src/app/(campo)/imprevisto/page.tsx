@@ -3,7 +3,7 @@ import { ImprevistoForm } from "@/components/diario/imprevisto-form";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 
 export default async function ImprevistoPage() {
-  const { imprevistos } = await getDiarioHoje();
+  const { diario, imprevistos } = await getDiarioHoje();
 
   return (
     <div className="space-y-4 p-4">
@@ -16,7 +16,7 @@ export default async function ImprevistoPage() {
 
       <Card>
         <CardContent className="pt-6">
-          <ImprevistoForm />
+          <ImprevistoForm diarioObraId={diario.id} />
         </CardContent>
       </Card>
 

@@ -1,7 +1,9 @@
+import { redirect } from "next/navigation";
 import { getDiarioHoje } from "@/actions/diario.actions";
-import { DiarioClient } from "@/components/diario/diario-client";
+
+export const dynamic = "force-dynamic";
 
 export default async function DiarioPage() {
   const data = await getDiarioHoje();
-  return <DiarioClient data={data} />;
+  redirect(`/diario/${data.diario.id}`);
 }

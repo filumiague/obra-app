@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
       case "imprevisto": {
         const fd = new FormData();
         fd.set("id", id);
+        fd.set("diarioObraId", payload.diarioObraId ?? "");
         fd.set("descricao", payload.descricao ?? "");
         fd.set("gravidade", payload.gravidade ?? "");
         fd.set("urgencia", payload.urgencia ?? "");
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
       case "midia": {
         const fd = new FormData();
         fd.set("id", id);
+        fd.set("diarioObraId", payload.diarioObraId ?? "");
         fd.set("etapaDiaPlanejadoId", payload.etapaDiaPlanejadoId ?? "");
         fd.set("legenda", payload.legenda ?? "");
         const file = formData.get("file");

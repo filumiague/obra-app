@@ -29,7 +29,13 @@ const O_QUE_PRECISA_LABELS: Record<string, string> = {
   OUTRO: "Outro",
 };
 
-export function ImprevistoForm({ onSuccess }: { onSuccess?: () => void }) {
+export function ImprevistoForm({
+  diarioObraId,
+  onSuccess,
+}: {
+  diarioObraId: string;
+  onSuccess?: () => void;
+}) {
   const [isPending, startTransition] = useTransition();
   const [gravidade, setGravidade] = useState("MEDIA");
   const [urgencia, setUrgencia] = useState("MEDIA");
@@ -41,9 +47,11 @@ export function ImprevistoForm({ onSuccess }: { onSuccess?: () => void }) {
     formData.set("gravidade", gravidade);
     formData.set("urgencia", urgencia);
     formData.set("oQuePrecisa", oQuePrecisa);
+    formData.set("diarioObraId", diarioObraId);
 
     const file = formData.get("file");
     const payload = {
+      diarioObraId,
       descricao: String(formData.get("descricao") ?? ""),
       gravidade,
       urgencia,

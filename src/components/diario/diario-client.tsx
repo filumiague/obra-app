@@ -3,8 +3,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle } from "lucide-react";
-import { addMaterialUso, setAvaliacaoDia } from "@/actions/diario.actions";
+import Link from "next/link";
+import {
+  AlertTriangle,
+  Plus,
+  History,
+  Trash2,
+  CalendarPlus,
+} from "lucide-react";
+import {
+  addMaterialUso,
+  setAvaliacaoDia,
+  criarMaterial,
+  apagarDiario,
+  criarDiario,
+} from "@/actions/diario.actions";
 import { tryOrQueue } from "@/lib/offline/sync";
 import { AtividadeCard } from "@/components/diario/atividade-card";
 import { ImprevistoForm } from "@/components/diario/imprevisto-form";
@@ -39,21 +52,48 @@ const CRITERIOS = [
 
 export function DiarioClient({ data }: { data: DiarioData }) {
   const [imprevistoOpen, setImprevistoOpen] = useState(false);
+  const [isDeleting, startDeleting] = useTransition();
 
-  const hoje = new Date(data.diario.data).toLocaleDateString("pt-BR", {
+  const dataFormatada = new Date(data.diario.data).toLocaleDateString("pt-BR", {
     weekday: "long",
     day: "2-digit",
     month: "long",
     timeZone: "UTC",
   });
 
+  function handleApagar() {
+    if (!confirm("Apagar este diário? Essa ação não pode ser desfeita.")) return;
+    startDeleting(async () => {
+      await apagarDiario(data.diario.id);
+    });
+  }
+
   return (
     <div className="space-y-4 p-4">
-      <div>
-        <h1 className="text-lg font-semibold capitalize">{hoje}</h1>
-        <p className="text-sm text-muted-foreground">
-          {data.itensPlanejados.length} atividade(s) prevista(s) para hoje
-        </p>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-semibold capitalize">{dataFormatada}</h1>
+          <p className="text-sm text-muted-foreground">
+            {data.itensPlanejados.length} atividade(s) prevista(s)
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <NovoDiarioButton />
+          <Button variant="outline" size="icon" title="Histórico de diários" render={
+            <Link href="/diario/historico" />
+          }>
+            <History className="size-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            title="Apagar diário"
+            disabled={isDeleting}
+            onClick={handleApagar}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {data.itensPlanejados.length === 0 && (
@@ -66,7 +106,7 @@ export function DiarioClient({ data }: { data: DiarioData }) {
 
       <div className="space-y-3">
         {data.itensPlanejados.map((item) => (
-          <AtividadeCard key={item.id} item={item} />
+          <AtividadeCard key={item.id} item={item} diarioObraId={data.diario.id} />
         ))}
       </div>
 
@@ -106,17 +146,27 @@ export function DiarioClient({ data }: { data: DiarioData }) {
           <DialogHeader>
             <DialogTitle>Reportar imprevisto</DialogTitle>
           </DialogHeader>
-          <ImprevistoForm onSuccess={() => setImprevistoOpen(false)} />
+          <ImprevistoForm
+            diarioObraId={data.diario.id}
+            onSuccess={() => setImprevistoOpen(false)}
+          />
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
+const NOVO_MATERIAL_VALUE = "__novo__";
+
 function MaterialUsoSection({ data }: { data: DiarioData }) {
+  const [materiais, setMateriais] = useState(data.materiais);
   const [materialId, setMaterialId] = useState("");
   const [quantidade, setQuantidade] = useState("");
+  const [novoMaterialOpen, setNovoMaterialOpen] = useState(false);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoUnidade, setNovoUnidade] = useState("");
   const [isPending, startTransition] = useTransition();
+  const [isCreating, startCreating] = useTransition();
   const router = useRouter();
 
   function handleAdd() {
@@ -125,7 +175,7 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
       toast.error("Selecione um material e informe uma quantidade válida.");
       return;
     }
-    const payload = { materialId, quantidade: qtd };
+    const payload = { diarioObraId: data.diario.id, materialId, quantidade: qtd };
     startTransition(async () => {
       const { queued, result } = await tryOrQueue(
         () => addMaterialUso(payload),
@@ -144,6 +194,29 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
       toast.success("Uso de material registrado.");
       setMaterialId("");
       setQuantidade("");
+      router.refresh();
+    });
+  }
+
+  function handleCriarMaterial() {
+    if (!novoNome.trim() || !novoUnidade.trim()) {
+      toast.error("Informe nome e unidade do novo material.");
+      return;
+    }
+    startCreating(async () => {
+      const result = await criarMaterial({ nome: novoNome, unidade: novoUnidade });
+      if (result.error || !result.material) {
+        toast.error(result.error ?? "Erro ao criar material.");
+        return;
+      }
+      setMateriais((prev) =>
+        [...prev, result.material!].sort((a, b) => a.nome.localeCompare(b.nome)),
+      );
+      setMaterialId(result.material.id);
+      setNovoNome("");
+      setNovoUnidade("");
+      setNovoMaterialOpen(false);
+      toast.success("Material cadastrado.");
       router.refresh();
     });
   }
@@ -168,34 +241,80 @@ function MaterialUsoSection({ data }: { data: DiarioData }) {
         )}
 
         <div className="flex gap-2">
-          <Select value={materialId} onValueChange={(v) => setMaterialId(v ?? "")}>
+          <Select
+            value={materialId}
+            onValueChange={(v) => {
+              if (v === NOVO_MATERIAL_VALUE) {
+                setNovoMaterialOpen(true);
+                return;
+              }
+              setMaterialId(v ?? "");
+            }}
+          >
             <SelectTrigger className="flex-1">
               <SelectValue placeholder="Material">
                 {(value: string | null) =>
-                  data.materiais.find((m) => m.id === value)?.nome ?? "Material"
+                  materiais.find((m) => m.id === value)?.nome ?? "Material"
                 }
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {data.materiais.map((m) => (
+              {materiais.map((m) => (
                 <SelectItem key={m.id} value={m.id}>
                   {m.nome} ({m.unidade})
                 </SelectItem>
               ))}
+              <SelectItem value={NOVO_MATERIAL_VALUE} className="font-medium text-primary">
+                + Novo material...
+              </SelectItem>
             </SelectContent>
           </Select>
           <Input
-            className="w-24"
+            className="w-20"
             placeholder="Qtd"
             inputMode="decimal"
             value={quantidade}
             onChange={(e) => setQuantidade(e.target.value)}
           />
           <Button type="button" disabled={isPending} onClick={handleAdd}>
-            +
+            <Plus className="size-4" />
           </Button>
         </div>
       </CardContent>
+
+      <Dialog open={novoMaterialOpen} onOpenChange={setNovoMaterialOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Novo material</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Nome</label>
+              <Input
+                value={novoNome}
+                onChange={(e) => setNovoNome(e.target.value)}
+                placeholder="Ex: Areia média"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Unidade</label>
+              <Input
+                value={novoUnidade}
+                onChange={(e) => setNovoUnidade(e.target.value)}
+                placeholder="Ex: m3, un, saco, kg"
+              />
+            </div>
+            <Button
+              type="button"
+              className="w-full"
+              disabled={isCreating}
+              onClick={handleCriarMaterial}
+            >
+              {isCreating ? "Criando..." : "Cadastrar material"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -252,6 +371,7 @@ function AvaliacaoSection({ data }: { data: DiarioData }) {
     }
     startTransition(async () => {
       const result = await setAvaliacaoDia({
+        diarioObraId: data.diario.id,
         nota,
         aderencia: criterios.aderencia,
         qualidade: criterios.qualidade,
@@ -305,5 +425,39 @@ function AvaliacaoSection({ data }: { data: DiarioData }) {
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+function NovoDiarioButton() {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(() => new Date().toISOString().slice(0, 10));
+  const [isPending, startTransition] = useTransition();
+
+  function handleCriar() {
+    startTransition(async () => {
+      await criarDiario(data);
+    });
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger render={<Button variant="outline" size="icon" title="Novo diário" />}>
+        <CalendarPlus className="size-4" />
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Novo diário</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Data</label>
+            <Input type="date" value={data} onChange={(e) => setData(e.target.value)} />
+          </div>
+          <Button type="button" className="w-full" disabled={isPending} onClick={handleCriar}>
+            {isPending ? "Criando..." : "Criar / abrir diário"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

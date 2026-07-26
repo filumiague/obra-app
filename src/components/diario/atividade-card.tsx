@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { Check } from "lucide-react";
 import { updateAtividadeStatus, addMidia } from "@/actions/diario.actions";
 import { tryOrQueue } from "@/lib/offline/sync";
 import { Button } from "@/components/ui/button";
@@ -44,7 +45,13 @@ type Item = {
   }[];
 };
 
-export function AtividadeCard({ item }: { item: Item }) {
+export function AtividadeCard({
+  item,
+  diarioObraId,
+}: {
+  item: Item;
+  diarioObraId: string;
+}) {
   const existing = item.atividadeDiario[0];
   const [status, setStatus] = useState<Status>(existing?.status ?? "NAO_INICIADO");
   const [oQueFoiFeito, setOQueFoiFeito] = useState(existing?.oQueFoiFeito ?? "");
@@ -55,17 +62,15 @@ export function AtividadeCard({ item }: { item: Item }) {
   const router = useRouter();
 
   const requiresMotivo = status === "PARCIAL" || status === "NAO_REALIZADO";
+  const concluido = status === "CONCLUIDO";
 
-  function handleSave() {
-    if (requiresMotivo && !motivoImpacto.trim()) {
-      toast.error("Descreva o motivo/impacto antes de salvar.");
-      return;
-    }
+  function salvarStatus(novoStatus: Status, motivo: string | null) {
     const payload = {
+      diarioObraId,
       etapaDiaPlanejadoId: item.id,
-      status,
+      status: novoStatus,
       oQueFoiFeito: oQueFoiFeito || null,
-      motivoImpacto: requiresMotivo ? motivoImpacto : null,
+      motivoImpacto: motivo,
     };
     startTransition(async () => {
       const { queued, result } = await tryOrQueue(
@@ -85,6 +90,20 @@ export function AtividadeCard({ item }: { item: Item }) {
     });
   }
 
+  function handleToggleConcluido() {
+    const novoStatus: Status = concluido ? "NAO_INICIADO" : "CONCLUIDO";
+    setStatus(novoStatus);
+    salvarStatus(novoStatus, null);
+  }
+
+  function handleSave() {
+    if (requiresMotivo && !motivoImpacto.trim()) {
+      toast.error("Descreva o motivo/impacto antes de salvar.");
+      return;
+    }
+    salvarStatus(status, requiresMotivo ? motivoImpacto : null);
+  }
+
   function handleFileChange() {
     const file = fileRef.current?.files?.[0];
     if (!file) return;
@@ -92,13 +111,14 @@ export function AtividadeCard({ item }: { item: Item }) {
       const { queued, result } = await tryOrQueue(
         async () => {
           const formData = new FormData();
+          formData.set("diarioObraId", diarioObraId);
           formData.set("etapaDiaPlanejadoId", item.id);
           formData.set("file", file);
           return addMidia(formData);
         },
         {
           kind: "midia",
-          payload: { etapaDiaPlanejadoId: item.id },
+          payload: { diarioObraId, etapaDiaPlanejadoId: item.id },
           fileBlob: file,
           fileName: file.name,
         },
@@ -119,9 +139,32 @@ export function AtividadeCard({ item }: { item: Item }) {
     <Card>
       <CardHeader className="space-y-1">
         <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-xs text-muted-foreground">{item.etapa.nome}</p>
-            <h3 className="font-semibold leading-snug">{item.atividadePlanejada}</h3>
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={handleToggleConcluido}
+              aria-label={concluido ? "Marcar como não concluído" : "Marcar como concluído"}
+              className={cn(
+                "mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md border-2 transition-colors",
+                concluido
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-input bg-transparent hover:border-primary/60",
+              )}
+            >
+              {concluido && <Check className="size-4" strokeWidth={3} />}
+            </button>
+            <div>
+              <p className="text-xs text-muted-foreground">{item.etapa.nome}</p>
+              <h3
+                className={cn(
+                  "font-semibold leading-snug",
+                  concluido && "text-muted-foreground line-through",
+                )}
+              >
+                {item.atividadePlanejada}
+              </h3>
+            </div>
           </div>
           <StatusBadge status={status} />
         </div>

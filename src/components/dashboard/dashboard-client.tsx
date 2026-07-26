@@ -90,12 +90,35 @@ function PlanejadoRealizado({
 }: {
   semanas: DashboardData["planejadoRealizado"];
 }) {
+  const todasEtapas = semanas.flatMap((s) => s.etapas);
+  const totalGeral = todasEtapas.reduce((sum, e) => sum + e.total, 0);
+  const concluidosGeral = todasEtapas.reduce((sum, e) => sum + e.concluidos, 0);
+  const pctGeral = totalGeral > 0 ? Math.round((concluidosGeral / totalGeral) * 100) : 0;
+
   return (
     <Card>
       <CardHeader>
-        <h2 className="font-semibold">Planejado × realizado</h2>
+        <h2 className="font-semibold">Andamento geral da obra</h2>
       </CardHeader>
       <CardContent className="space-y-4">
+        {totalGeral > 0 && (
+          <div className="flex items-center gap-4 rounded-lg border bg-accent/50 p-4">
+            <p className="text-3xl font-bold text-primary">{pctGeral}%</p>
+            <div className="flex-1">
+              <p className="text-sm font-medium">Realizado</p>
+              <p className="text-xs text-muted-foreground">
+                {concluidosGeral} de {totalGeral} atividades planejadas concluídas
+              </p>
+              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${pctGeral}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
         {semanas.length === 0 && (
           <p className="text-sm text-muted-foreground">Nenhuma semana cadastrada.</p>
         )}
@@ -123,7 +146,7 @@ function PlanejadoRealizado({
                     </div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full bg-foreground"
+                        className="h-full bg-primary"
                         style={{ width: `${pct}%` }}
                       />
                     </div>

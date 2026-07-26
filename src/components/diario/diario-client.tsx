@@ -70,9 +70,7 @@ export function DiarioClient({ data }: { data: DiarioData }) {
       <div className="flex items-start justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold capitalize">{dataFormatada}</h1>
-          <p className="text-sm text-muted-foreground">
-            {data.itensPlanejados.length} atividade(s) prevista(s)
-          </p>
+          <ProgressoChecklist itensPlanejados={data.itensPlanejados} />
         </div>
         <div className="flex shrink-0 gap-1.5">
           <NovoDiarioButton />
@@ -150,6 +148,32 @@ export function DiarioClient({ data }: { data: DiarioData }) {
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function ProgressoChecklist({
+  itensPlanejados,
+}: {
+  itensPlanejados: DiarioData["itensPlanejados"];
+}) {
+  const total = itensPlanejados.length;
+  if (total === 0) {
+    return <p className="text-sm text-muted-foreground">Nenhuma atividade prevista</p>;
+  }
+  const concluidas = itensPlanejados.filter(
+    (item) => item.atividadeDiario[0]?.status === "CONCLUIDO",
+  ).length;
+  const pct = Math.round((concluidas / total) * 100);
+
+  return (
+    <div className="mt-1 space-y-1">
+      <p className="text-sm text-muted-foreground">
+        {concluidas} de {total} concluídas — <span className="font-semibold text-primary">{pct}%</span>
+      </p>
+      <div className="h-1.5 w-40 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }
